@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-require('dotenv').config(); // This loads environment variables from the .env file
+require('dotenv').config();
 
 
 const app = express();
@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(
   cors({
-    origin: 'http://127.0.0.1:5500',
+    origin: 'https://naijagamer.netlify.app',
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
@@ -33,18 +33,18 @@ const connectToDatabase = async () => {
   let retries = 5;  // Max retries
   while (retries) {
     try {
-      await db; // Await the connection (as it's a promise)
+      await db; 
       console.log('Connected to the database');
-      break;  // Exit the loop if connection is successful
+      break;  
     } catch (err) {
       console.error('Database connection failed:', err.message);
       retries -= 1;
       if (retries === 0) {
         console.error('Max retries reached. Exiting process.');
-        process.exit(1); // Exit process after max retries
+        process.exit(1); 
       }
       console.log(`Retrying... (${5 - retries} attempt(s) left)`);
-      await new Promise(res => setTimeout(res, 5000)); // Wait 5 seconds before retry
+      await new Promise(res => setTimeout(res, 5000)); 
     }
   }
 };
@@ -52,12 +52,11 @@ const connectToDatabase = async () => {
 // Connect to the database
 connectToDatabase();
 
-// Helper function to generate JWT
 const generateToken = (userId) => {
   return jwt.sign(
-    { user_id: userId }, // Payload including user ID
-    'secretkey',     // Secret key for signing the token
-    { expiresIn: '24h' }  // Token expiration time (24 hours)
+    { user_id: userId }, 
+    'secretkey',   
+    { expiresIn: '24h' }  
   );
 };
 
@@ -75,7 +74,7 @@ app.post('/register', async (req, res) => {
     // Insert user data into the database
     db.query(
       'INSERT INTO users (username, password, balance, email, phone_number) VALUES (?, ?, ?, ?, ?)',
-      [username, hashedPassword, 1000, email || null, phone_number || null], // Use null if email or phone_number is not provided
+      [username, hashedPassword, 1000, email, phone_number], 
       (err, result) => {
         if (err) {
           if (err.code === 'ER_DUP_ENTRY') {
@@ -86,7 +85,7 @@ app.post('/register', async (req, res) => {
         }
 
         // Generate a token after successful registration
-        const token = generateToken(result.insertId); // Use the ID of the newly created user
+        const token = generateToken(result.insertId);
         res.status(201).json({ message: 'User registered successfully', token });
       }
     );
@@ -116,7 +115,7 @@ app.post('/login', (req, res) => {
         return res.status(400).json({ error: 'Invalid username or password' });
       }
 
-      const token = generateToken(user.user_id);  // Ensure user.id is passed here
+      const token = generateToken(user.user_id);
       res.status(200).json({ token });
     });
   });
@@ -152,16 +151,13 @@ app.route('/balance')
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
-
     if (balance === undefined || isNaN(balance)) {
       return res.status(400).json({ error: 'Valid balance value required' });
     }
-
     jwt.verify(token, 'secretkey', (err, decoded) => {
       if (err) {
         return res.status(401).json({ error: 'Invalid token' });
       }
-
 
       db.query('UPDATE users SET balance = ? WHERE user_id = ?', [balance, decoded.user_id], (err, result) => {
         if (err) {
@@ -179,7 +175,7 @@ app.route('/balance')
 // Store game outcome
 app.post('/outcome', (req, res) => {
   const token = req.headers['authorization'];
-  const { betAmount, numberOfPanels, outcome, payout } = req.body;
+  const { betAmount, numberOfPanels, outcome, payout, jackpot_type } = req.body;
 
   if (!token) {
     return res.status(401).json({ error: 'No token provided' });
@@ -193,32 +189,28 @@ app.post('/outcome', (req, res) => {
     // Fetch current balance
     db.query('SELECT balance FROM users WHERE user_id = ?', [decoded.user_id], (err, result) => {  
       if (err || result.length === 0) {
-        console.error('Error fetching balance or user not found:', err);
         return res.status(500).json({ error: 'Error fetching balance' });
       }
-
+      const balanceAfter = currentBalance + payout - betAmount;
       const currentBalance = result[0].balance;
-      // if (betAmount > currentBalance) {
-      //   return res.status(400).json({ error: 'Insufficient balance' });
-      // }
+      if (betAmount > currentBalance) {
+        return res.status(400).json({ error: 'Insufficient balance' });
+      };
 
-      const newBalance = currentBalance + payout - betAmount;
-
-// Log game outcome in `game_outcomes` table
+// Log game outcome
 const query = `
-  INSERT INTO game_outcomes (user_id, bet_amount, panels, outcome, payout, balance_after, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO game_outcomes (user_id, bet_amount, panels, outcome, payout, balance_after, jackpot_type, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `;
-const values = [decoded.user_id, betAmount, numberOfPanels, JSON.stringify(outcome), payout, newBalance, new Date()];
+const values = [decoded.user_id, betAmount, numberOfPanels, JSON.stringify(outcome), payout, balanceAfter, jackpot_type, new Date()];
 
 db.query(query, values, (err) => {
   if (err) {
-    console.error('Error logging game outcome:', err);
     return res.status(500).json({ error: 'Error logging game outcome' });
   }
 
   // Update user balance
-  db.query('UPDATE users SET balance = ? WHERE user_id = ?', [newBalance, decoded.user_id], (err) => {
+  db.query('UPDATE users SET balance = ? WHERE user_id = ?', [balanceAfter, decoded.user_id], (err) => {
     if (err) {
       console.error('Error updating user balance:', err);
       return res.status(500).json({ error: 'Error updating user balance' });
@@ -226,7 +218,7 @@ db.query(query, values, (err) => {
     
     res.status(200).json({
       message: 'Game outcome processed successfully',
-      newBalance,
+      balanceAfter,
           });
         });
       });
@@ -234,6 +226,22 @@ db.query(query, values, (err) => {
   });
 });
 
+// Endpoint to get the last 50 jackpot winners
+app.get('/winners', (req, res) => {
+  db.query('SELECT username, jackpot_type, payout, created_at FROM game_outcomes ORDER BY created_at DESC LIMIT 50', (err, result) => {
+    if (err) {
+      console.error('Error fetching winners:', err);
+      return res.status(500).json({ error: 'Error fetching winners' });
+    }
+
+    // Map winners into a formatted message
+    const winners = result.map((winner) => {
+      return `${winner.username} has won a ${winner.jackpot_type} jackpot for N${winner.payout.toLocaleString()}!!!`;
+    });
+
+    res.status(200).json({ winners });
+  });
+});
 
 // Add user-info endpoint
 app.get('/user-info', (req, res) => {
@@ -249,7 +257,7 @@ app.get('/user-info', (req, res) => {
     }
 
     db.query(
-      'SELECT username, balance FROM users WHERE user_id = ?',  // Ensure 'id' is used here
+      'SELECT username, balance FROM users WHERE user_id = ?',
       [decoded.user_id],
       (err, result) => {
         if (err || result.length === 0) {
@@ -267,5 +275,5 @@ app.get('/user-info', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Server is running on ${PORT}`);
 });
